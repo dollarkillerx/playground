@@ -9,6 +9,7 @@ require (
 	contrib.go.opencensus.io/exporter/prometheus v0.1.0
 	contrib.go.opencensus.io/exporter/stackdriver v0.13.1
 	github.com/bradfitz/gomemcache v0.0.0-20190329173943-551aad21a668
+	github.com/dollarkillerx/urllib v1.13.12
 	github.com/google/go-cmp v0.4.0
 	go.opencensus.io v0.22.3
 	golang.org/x/build v0.0.0-20190709001953-30c0e6b89ea0

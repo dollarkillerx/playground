@@ -35,7 +35,8 @@ import (
 	"unicode/utf8"
 
 	"cloud.google.com/go/compute/metadata"
-	"github.com/bradfitz/gomemcache/memcache"
+	"github.com/dollarkillerx/urllib"
+	//"github.com/bradfitz/gomemcache/memcache"
 	"go.opencensus.io/stats"
 	"go.opencensus.io/tag"
 	"golang.org/x/playground/internal"
@@ -94,7 +95,7 @@ type response struct {
 // The handler returned supports Cross-Origin Resource Sharing (CORS) from any domain.
 func (s *server) commandHandler(cachePrefix string, cmdFunc func(context.Context, *request) (*response, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		cachePrefix := cachePrefix // so we can modify it below
+		//cachePrefix := cachePrefix // so we can modify it below
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		if r.Method == "OPTIONS" {
 			// This is likely a pre-flight CORS request.
@@ -112,57 +113,72 @@ func (s *server) commandHandler(cachePrefix string, cmdFunc func(context.Context
 			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 			return
 		}
-
-		if req.WithVet {
-			cachePrefix += "_vet" // "prog" -> "prog_vet"
+		fmt.Println(req.Body)
+		fmt.Println(req.WithVet)
+		fmt.Println("in......")
+		url := "https://play.golang.org/compile"
+		_, rs, err := urllib.Post(url).Params("version", "2").Params("body", req.Body).Params("withVet", "true").ByteOriginal()
+		if err != nil {
+			log.Printf("err: %s", err.Error)
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
 		}
+		var resp response
+		err = json.Unmarshal(rs, &resp)
+		fmt.Println(string(rs))
 
-		resp := &response{}
-		key := cacheKey(cachePrefix, req.Body)
-		if err := s.cache.Get(key, resp); err != nil {
-			if !errors.Is(err, memcache.ErrCacheMiss) {
-				s.log.Errorf("s.cache.Get(%q, &response): %v", key, err)
-			}
-			resp, err = cmdFunc(r.Context(), &req)
-			if err != nil {
-				s.log.Errorf("cmdFunc error: %v", err)
-				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-				return
-			}
-			if strings.Contains(resp.Errors, goBuildTimeoutError) || strings.Contains(resp.Errors, runTimeoutError) {
-				// TODO(golang.org/issue/38576) - This should be a http.StatusBadRequest,
-				// but the UI requires a 200 to parse the response. It's difficult to know
-				// if we've timed out because of an error in the code snippet, or instability
-				// on the playground itself. Either way, we should try to show the user the
-				// partial output of their program.
-				s.writeResponse(w, resp, http.StatusOK)
-				return
-			}
-			for _, e := range internalErrors {
-				if strings.Contains(resp.Errors, e) {
-					s.log.Errorf("cmdFunc compilation error: %q", resp.Errors)
-					http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-					return
-				}
-			}
-			for _, el := range resp.Events {
-				if el.Kind != "stderr" {
-					continue
-				}
-				for _, e := range internalErrors {
-					if strings.Contains(el.Message, e) {
-						s.log.Errorf("cmdFunc runtime error: %q", el.Message)
-						http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-						return
-					}
-				}
-			}
-			if err := s.cache.Set(key, resp); err != nil {
-				s.log.Errorf("cache.Set(%q, resp): %v", key, err)
-			}
-		}
+		s.writeResponse(w, &resp, http.StatusOK)
 
-		s.writeResponse(w, resp, http.StatusOK)
+		//if req.WithVet {
+		//	cachePrefix += "_vet" // "prog" -> "prog_vet"
+		//}
+		//
+		//resp := &response{}
+		//key := cacheKey(cachePrefix, req.Body)
+		//if err := s.cache.Get(key, resp); err != nil {
+		//	if !errors.Is(err, memcache.ErrCacheMiss) {
+		//		s.log.Errorf("s.cache.Get(%q, &response): %v", key, err)
+		//	}
+		//	resp, err = cmdFunc(r.Context(), &req)
+		//	if err != nil {
+		//		s.log.Errorf("cmdFunc error: %v", err)
+		//		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		//		return
+		//	}
+		//	if strings.Contains(resp.Errors, goBuildTimeoutError) || strings.Contains(resp.Errors, runTimeoutError) {
+		//		// TODO(golang.org/issue/38576) - This should be a http.StatusBadRequest,
+		//		// but the UI requires a 200 to parse the response. It's difficult to know
+		//		// if we've timed out because of an error in the code snippet, or instability
+		//		// on the playground itself. Either way, we should try to show the user the
+		//		// partial output of their program.
+		//		s.writeResponse(w, resp, http.StatusOK)
+		//		return
+		//	}
+		//	for _, e := range internalErrors {
+		//		if strings.Contains(resp.Errors, e) {
+		//			s.log.Errorf("cmdFunc compilation error: %q", resp.Errors)
+		//			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		//			return
+		//		}
+		//	}
+		//	for _, el := range resp.Events {
+		//		if el.Kind != "stderr" {
+		//			continue
+		//		}
+		//		for _, e := range internalErrors {
+		//			if strings.Contains(el.Message, e) {
+		//				s.log.Errorf("cmdFunc runtime error: %q", el.Message)
+		//				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		//				return
+		//			}
+		//		}
+		//	}
+		//	if err := s.cache.Set(key, resp); err != nil {
+		//		s.log.Errorf("cache.Set(%q, resp): %v", key, err)
+		//	}
+		//}
+		//
+		//s.writeResponse(w, resp, http.StatusOK)
 	}
 }
 
@@ -345,51 +361,57 @@ var failedTestPattern = "--- FAIL"
 // *response.Errors contains an explanation for a user.
 func compileAndRun(ctx context.Context, req *request) (*response, error) {
 	// TODO(andybons): Add semaphore to limit number of running programs at once.
-	tmpDir, err := ioutil.TempDir("", "sandbox")
+	fmt.Println("in......")
+	url := "https://play.golang.org/compile"
+	_, rs, err := urllib.Post(url).SetJson([]byte(req.Body)).ByteOriginal()
 	if err != nil {
-		return nil, fmt.Errorf("error creating temp directory: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	br, err := sandboxBuild(ctx, tmpDir, []byte(req.Body), req.WithVet)
-	if err != nil {
+		log.Printf("err: %s", err.Error)
 		return nil, err
 	}
-	if br.errorMessage != "" {
-		return &response{Errors: br.errorMessage}, nil
-	}
+	var resp response
+	err = json.Unmarshal(rs, &resp)
+	return &resp, err
 
-	execRes, err := sandboxRun(ctx, br.exePath, br.testParam)
-	if err != nil {
-		return nil, err
-	}
-	if execRes.Error != "" {
-		return &response{Errors: execRes.Error}, nil
-	}
-
-	rec := new(Recorder)
-	rec.Stdout().Write(execRes.Stdout)
-	rec.Stderr().Write(execRes.Stderr)
-	events, err := rec.Events()
-	if err != nil {
-		log.Printf("error decoding events: %v", err)
-		return nil, fmt.Errorf("error decoding events: %v", err)
-	}
-	var fails int
-	if br.testParam != "" {
-		// In case of testing the TestsFailed field contains how many tests have failed.
-		for _, e := range events {
-			fails += strings.Count(e.Message, failedTestPattern)
-		}
-	}
-	return &response{
-		Events:      events,
-		Status:      execRes.ExitCode,
-		IsTest:      br.testParam != "",
-		TestsFailed: fails,
-		VetErrors:   br.vetOut,
-		VetOK:       req.WithVet && br.vetOut == "",
-	}, nil
+	//tmpDir, err := ioutil.TempDir("", "sandbox")
+	//if err != nil {
+	//	return nil, fmt.Errorf("error creating temp directory: %v", err)
+	//}
+	//defer os.RemoveAll(tmpDir)
+	//
+	//br, err := sandboxBuild(ctx, tmpDir, []byte(req.Body), req.WithVet)
+	//if err != nil {
+	//	return nil, err
+	//}
+	//if br.errorMessage != "" {
+	//	return &response{Errors: br.errorMessage}, nil
+	//}
+	//
+	//execRes, err := sandboxRun(ctx, br.exePath, br.testParam)
+	//if err != nil {
+	//	return nil, err
+	//}
+	//if execRes.Error != "" {
+	//	return &response{Errors: execRes.Error}, nil
+	//}
+	//
+	//rec := new(Recorder)
+	//rec.Stdout().Write(execRes.Stdout)
+	//rec.Stderr().Write(execRes.Stderr)
+	//events, err := rec.Events()
+	//if err != nil {
+	//	log.Printf("error decoding events: %v", err)
+	//	return nil, fmt.Errorf("error decoding events: %v", err)
+	//}
+	//var fails int
+	//if br.testParam != "" {
+	//	// In case of testing the TestsFailed field contains how many tests have failed.
+	//	for _, e := range events {
+	//		fails += strings.Count(e.Message, failedTestPattern)
+	//	}
+	//}
+	//return &response{
+	//
+	//}, nil
 }
 
 // buildResult is the output of a sandbox build attempt.
@@ -479,9 +501,9 @@ func sandboxBuild(ctx context.Context, tmpDir string, in []byte, vet bool) (br *
 	br.exePath = filepath.Join(tmpDir, "a.out")
 	goCache := filepath.Join(tmpDir, "gocache")
 
-	cmd := exec.Command("/usr/local/go-faketime/bin/go", "build", "-o", br.exePath, "-tags=faketime")
+	cmd := exec.Command(fmt.Sprintf("%s/bin/go", os.Getenv("GOROOT")), "build", "-o", br.exePath, "-tags=faketime")
 	cmd.Dir = tmpDir
-	cmd.Env = []string{"GOOS=linux", "GOARCH=amd64", "GOROOT=/usr/local/go-faketime"}
+	cmd.Env = []string{"GOOS=linux", "GOARCH=amd64", fmt.Sprintf("GOROOT=%s", os.Getenv("GOROOT"))}
 	cmd.Env = append(cmd.Env, "GOCACHE="+goCache)
 	cmd.Env = append(cmd.Env, "CGO_ENABLED=0")
 	// Create a GOPATH just for modules to be downloaded
